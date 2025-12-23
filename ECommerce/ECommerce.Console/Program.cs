@@ -1,56 +1,73 @@
 ﻿using System;
-using ECommerce.Common; 
+using System.Collections.Concurrent; // Для потокобезпечних колекцій
+using System.Diagnostics; // Для заміру часу
+using System.Linq;
+using System.Threading.Tasks;
+using ECommerce.Common;
 
-namespace ECommerce.Console
+namespace ECommerce.ConsoleApp
 {
     class Program
     {
-        static void Main(string[] args)
+        // робимо Main асинхронним 
+        static async Task Main(string[] args)
         {
-            // Створюємо сервіс
-            SimpleCrudService<Product> productService = new SimpleCrudService<Product>();
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.WriteLine("Асинхронність ");
+
+            string filePath = "products_data.json";
             
-            // Підписка на подію зміни ціни
-            productService.ProductPriceChanged += (sender, message) => 
+            var service = new AsyncCrudService<Product>(filePath);
+
+            Console.WriteLine("\n[1] Початок паралельної генерації 1000 товарів...");
+            var stopwatch = Stopwatch.StartNew();
+
+          
+            var tasks = new Task[1000];
+            
+            for (int i = 0; i < 1000; i++)
             {
-                System.Console.WriteLine("-------------------------");
-                System.Console.WriteLine($">>> УВАГА! {message}"); 
-            };
-
-            System.Console.WriteLine("=== ТЕСТУВАННЯ МАГАЗИНУ ===");
-
-            // Створюємо товари
-            var laptop = new Electronics("MacBook Pro", 2500m, "Apple", 12);
-            laptop.Id = Guid.NewGuid();
-
-            var tshirt = new Clothing("Футболка Geek", 25m, "L", "Бавовна");
-            tshirt.Id = Guid.NewGuid();
-
-            // Додаємо
-            productService.Create(laptop);
-            productService.Create(tshirt);
-
-            // Виводимо список
-            System.Console.WriteLine("\n--- Список товарів ---");
-            foreach (var p in productService.GetAll())
-            {
-                System.Console.WriteLine($"{p.Name} - {p.Price}$");
+                tasks[i] = Task.Run(async () => 
+                {
+                    var product = Electronics.CreateNew();
+                    await service.CreateAsync(product);
+                });
             }
 
-            // Оновлюємо ціну
-            System.Console.WriteLine("\n--- Зміна ціни ---");
-            laptop.Price = 2000m; 
-            productService.Update(laptop);
+            await Task.WhenAll(tasks);
+            stopwatch.Stop();
 
-            // Видаляємо
-            System.Console.WriteLine("\n--- Видалення товару ---");
-            productService.Delete(tshirt.Id); 
+            Console.WriteLine($"[Готово] 1000 товарів створено та додано за {stopwatch.ElapsedMilliseconds} мс.");
 
-            // Фінальний список
-            System.Console.WriteLine("\n--- Залишилось товарів ---");
-            foreach (var p in productService.GetAll())
+            Console.WriteLine("\n[2] Аналіз даних...");
+            var allProducts = await service.ReadAllAsync();
+            
+            if (allProducts.Any())
             {
-                System.Console.WriteLine(p.Name);
+                var minPrice = allProducts.Min(p => p.Price);
+                var maxPrice = allProducts.Max(p => p.Price);
+                var avgPrice = allProducts.Average(p => p.Price);
+
+                Console.WriteLine($"   -> Мінімальна ціна: {minPrice}$");
+                Console.WriteLine($"   -> Максимальна ціна: {maxPrice}$");
+                Console.WriteLine($"   -> Середня ціна:    {avgPrice:F2}$");
+            }
+
+            Console.WriteLine("\n[3] Тест пагінації (сторінка 2, по 5 штук):");
+            var page2 = await service.ReadAllAsync(page: 2, amount: 5);
+            foreach (var p in page2)
+            {
+                Console.WriteLine($"   - {p.Name} ({p.Price}$)");
+            }
+
+            Console.WriteLine($"\n[4] Збереження колекції у файл '{filePath}'...");
+            bool saved = await service.SaveAsync();
+            Console.WriteLine(saved ? "   [Успіх] Дані збережено." : "   [Помилка] Не вдалося зберегти.");
+
+            // перевірка, що файл існує
+            if (System.IO.File.Exists(filePath))
+            {
+                Console.WriteLine($"   Файл існує, розмір: {new System.IO.FileInfo(filePath).Length} байт.");
             }
         }
     }
