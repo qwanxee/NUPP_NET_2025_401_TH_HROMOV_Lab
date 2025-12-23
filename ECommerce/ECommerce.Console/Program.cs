@@ -1,73 +1,57 @@
 ﻿using System;
-using System.Collections.Concurrent; // Для потокобезпечних колекцій
-using System.Diagnostics; // Для заміру часу
-using System.Linq;
 using System.Threading.Tasks;
 using ECommerce.Common;
+using ECommerce.Infrastructure; // Для контексту бази
+using ECommerce.Infrastructure.Models; // Для сутностей
+using ECommerce.Infrastructure.Repositories; // Для репозиторіїв
 
 namespace ECommerce.ConsoleApp
 {
     class Program
     {
-        // робимо Main асинхронним 
         static async Task Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.WriteLine("Асинхронність ");
+            Console.WriteLine("=== ЛАБОРАТОРНА РОБОТА №3: База Даних та EF Core ===");
 
-            string filePath = "products_data.json";
+            // 1. Створюємо контекст (підключення до БД)
+            using var context = new ECommerceContext();
             
-            var service = new AsyncCrudService<Product>(filePath);
+            // Гарантуємо, що база створена
+            context.Database.EnsureCreated();
 
-            Console.WriteLine("\n[1] Початок паралельної генерації 1000 товарів...");
-            var stopwatch = Stopwatch.StartNew();
+            // 2. Створюємо Репозиторій
+            // Зверни увагу: ми використовуємо ProductEntity, а не Product з першої лаби,
+            // бо база даних працює з моделями з папки Infrastructure/Models
+            var repository = new BaseRepository<ProductEntity>(context);
 
-          
-            var tasks = new Task[1000];
+            // 3. Створюємо Сервіс і передаємо туди репозиторій
+            var service = new AsyncCrudService<ProductEntity>(repository);
+
+            Console.WriteLine("\n[1] Додаємо тестовий товар у Базу Даних...");
             
-            for (int i = 0; i < 1000; i++)
+            var newProduct = new ElectronicsEntity
             {
-                tasks[i] = Task.Run(async () => 
-                {
-                    var product = Electronics.CreateNew();
-                    await service.CreateAsync(product);
-                });
-            }
+                Name = "Samsung Galaxy S24",
+                Price = 1200,
+                Brand = "Samsung",
+                WarrantyMonths = 24,
+                CategoryId = 1 // Припускаємо, що категорія 1 існує (Seeding)
+            };
 
-            await Task.WhenAll(tasks);
-            stopwatch.Stop();
+            await service.CreateAsync(newProduct);
+            Console.WriteLine("   -> Товар додано в чергу.");
 
-            Console.WriteLine($"[Готово] 1000 товарів створено та додано за {stopwatch.ElapsedMilliseconds} мс.");
+            // Зберігаємо зміни (хоча BaseRepository вже робить Save, але для надійності)
+            await service.SaveAsync();
+            Console.WriteLine("   -> Зміни збережено в БД (ecommerce.db).");
 
-            Console.WriteLine("\n[2] Аналіз даних...");
-            var allProducts = await service.ReadAllAsync();
+            Console.WriteLine("\n[2] Читаємо всі товари з Бази Даних:");
+            var products = await service.ReadAllAsync();
             
-            if (allProducts.Any())
+            foreach (var p in products)
             {
-                var minPrice = allProducts.Min(p => p.Price);
-                var maxPrice = allProducts.Max(p => p.Price);
-                var avgPrice = allProducts.Average(p => p.Price);
-
-                Console.WriteLine($"   -> Мінімальна ціна: {minPrice}$");
-                Console.WriteLine($"   -> Максимальна ціна: {maxPrice}$");
-                Console.WriteLine($"   -> Середня ціна:    {avgPrice:F2}$");
-            }
-
-            Console.WriteLine("\n[3] Тест пагінації (сторінка 2, по 5 штук):");
-            var page2 = await service.ReadAllAsync(page: 2, amount: 5);
-            foreach (var p in page2)
-            {
-                Console.WriteLine($"   - {p.Name} ({p.Price}$)");
-            }
-
-            Console.WriteLine($"\n[4] Збереження колекції у файл '{filePath}'...");
-            bool saved = await service.SaveAsync();
-            Console.WriteLine(saved ? "   [Успіх] Дані збережено." : "   [Помилка] Не вдалося зберегти.");
-
-            // перевірка, що файл існує
-            if (System.IO.File.Exists(filePath))
-            {
-                Console.WriteLine($"   Файл існує, розмір: {new System.IO.FileInfo(filePath).Length} байт.");
+                Console.WriteLine($"   ID: {p.Id} | {p.Name} - {p.Price}$");
             }
         }
     }
